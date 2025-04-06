@@ -8,8 +8,8 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 # SETTINGS
-CAMERA_RTSP_1 = "rtsp://admin:[labh2708]@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
-CAMERA_RTSP_2 = "rtsp://admin:[labh2708]@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
+CAMERA_RTSP_1 = "rtsp://admin:labh2708@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
+CAMERA_RTSP_2 = "rtsp://admin:labh2708@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
 OUTPUT_DIR = "/mnt/security_footage"
 ARCHIVE_DIR = "/mnt/security_archived"
 ENCODER = "h264_amf"  # Use "hevc_amf" for H.265
