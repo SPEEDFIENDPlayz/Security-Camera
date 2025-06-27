@@ -9,8 +9,8 @@ import time
 import subprocess
 
 # Configuration
-CAMERA_1_INDEX = 0
-CAMERA_2_INDEX = 1
+CAMERA_1_INDEX = "rtsp://admin:labh2708@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
+CAMERA_2_INDEX = "rtsp://admin:labh2708@192.168.1.107:554/cam/realmonitor?channel=1&subtype=0"
 RECORD_INTERVAL_HOURS = 12
 OUTPUT_DIR = os.path.join(os.getcwd(), "recordings")
 ARCHIVE_DIR = os.path.join(os.getcwd(), "archived")
@@ -19,6 +19,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
 recording = False
+manual_override = False
 camera_feeds = {1: None, 2: None}
 recording_status = None
 feed_threads = {}
@@ -72,7 +73,7 @@ def record_from_camera(index, camera_id):
     start_time = time.time()
     max_duration = RECORD_INTERVAL_HOURS * 3600
 
-    while time.time() - start_time < max_duration and recording:
+    while (time.time() - start_time < max_duration or manual_override) and recording:
         ret, frame = cap.read()
         if not ret:
             break
@@ -90,7 +91,7 @@ def schedule_recording():
     while True:
         now = datetime.datetime.now()
         if now.hour in [0, 12] and now.minute == 0:
-            if not recording:
+            if not recording and not manual_override:
                 recording = True
                 threading.Thread(target=record_all).start()
         time.sleep(60)  # check every minute
@@ -103,8 +104,23 @@ def record_all():
     threading.Thread(target=record_from_camera, args=(CAMERA_2_INDEX, 2)).start()
     duration = RECORD_INTERVAL_HOURS * 3600
     time.sleep(duration)
-    recording = False
+    if not manual_override:
+        recording = False
     print("Recording cycle completed.")
+
+# Manual controls
+
+def start_manual_recording():
+    global recording, manual_override
+    if not recording:
+        recording = True
+        manual_override = True
+        threading.Thread(target=record_all).start()
+
+def stop_manual_recording():
+    global recording, manual_override
+    manual_override = False
+    recording = False
 
 # Show feed
 
@@ -143,7 +159,7 @@ def show_feed(camera_id):
 
 root = tk.Tk()
 root.title("Security Camera System")
-root.geometry("400x300")
+root.geometry("400x400")
 
 btn1 = tk.Button(root, text="Show Camera 1 Feed", command=lambda: show_feed(1))
 btn1.pack(pady=5)
@@ -168,9 +184,16 @@ def update_gui():
 btn_open = tk.Button(root, text="📁 Open Folder", command=open_folder)
 btn_open.pack(pady=10)
 
+btn_start_manual = tk.Button(root, text="Start Manual Recording", command=start_manual_recording)
+btn_start_manual.pack(pady=5)
+
+btn_stop_manual = tk.Button(root, text="Stop Manual Recording", command=stop_manual_recording)
+btn_stop_manual.pack(pady=5)
+
 update_gui()
 
 # Start scheduler thread
 threading.Thread(target=schedule_recording, daemon=True).start()
 
 root.mainloop()
+
