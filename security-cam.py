@@ -1,147 +1,176 @@
 import cv2
 import os
-import time
+import tkinter as tk
+from tkinter import messagebox
+from tkinter import filedialog
 import threading
-from datetime import datetime, timedelta
-from tkinter import *
-from tkinter import ttk, messagebox
+import datetime
+import time
+import subprocess
 
-# === CONFIG ===
-CAMERA_1_INDEX = "rtsp://admin:labh2708@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
-CAMERA_2_INDEX = "rtsp://admin:labh2708@192.168.1.107:554/cam/realmonitor?channel=1&subtype=0"
-OUTPUT_DIR = "/mnt/data/security_footage"
+# Configuration
+CAMERA_1_INDEX = 0
+CAMERA_2_INDEX = 1
 RECORD_INTERVAL_HOURS = 12
-DELETE_AFTER_DAYS = 7
-ARCHIVE_DIR = os.path.join(OUTPUT_DIR, "archived")
+OUTPUT_DIR = os.path.join(os.getcwd(), "recordings")
+ARCHIVE_DIR = os.path.join(os.getcwd(), "archived")
 
-# === GLOBALS ===
-recording = False
-feed_windows = {}
-camera_status = {1: "Unknown", 2: "Unknown"}
-
-# === SETUP ===
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
-# === CAMERA FEED HANDLER ===
-def check_camera_status(cam_index, label):
-    cap = cv2.VideoCapture(cam_index)
-    if cap.isOpened():
-        ret, _ = cap.read()
-        if ret:
-            camera_status[cam_index + 1] = "Online"
-            label.config(text="Camera {}: Online".format(cam_index + 1), fg="green")
-        else:
-            camera_status[cam_index + 1] = "Offline"
-            label.config(text="Camera {}: Offline".format(cam_index + 1), fg="red")
-    else:
-        camera_status[cam_index + 1] = "Offline"
-        label.config(text="Camera {}: Offline".format(cam_index + 1), fg="red")
+recording = False
+camera_feeds = {1: None, 2: None}
+recording_status = None
+feed_threads = {}
+
+# Open folder
+
+def open_folder():
+    try:
+        os.startfile(OUTPUT_DIR)
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+# Check camera availability
+
+def check_camera(index):
+    cap = cv2.VideoCapture(index)
+    if cap is None or not cap.isOpened():
+        return False
     cap.release()
+    return True
 
+def update_status():
+    cam1 = "Online" if check_camera(CAMERA_1_INDEX) else "Offline"
+    cam2 = "Online" if check_camera(CAMERA_2_INDEX) else "Offline"
+    cam1_status.config(text=f"Camera 1: {cam1}")
+    cam2_status.config(text=f"Camera 2: {cam2}")
 
-def toggle_feed(cam_index, title):
-    if cam_index in feed_windows:
-        cv2.destroyWindow(title)
-        del feed_windows[cam_index]
-        return
+# Recording logic
 
-    cap = cv2.VideoCapture(cam_index)
+def get_output_path(camera_id):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+    filename = f"camera{camera_id}_{timestamp}.mp4"
+    return os.path.join(OUTPUT_DIR, filename)
+
+def record_from_camera(index, camera_id):
+    global recording
+    cap = cv2.VideoCapture(index)
+    fourcc = cv2.VideoWriter_fourcc(*'X264')  # H.264 encoding
+    output_path = get_output_path(camera_id)
+    out = None
+
     if not cap.isOpened():
-        messagebox.showerror("Error", f"Camera {cam_index} not available")
+        print(f"Camera {camera_id} failed to open.")
         return
 
-    def show_feed():
-        while cam_index in feed_windows:
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = 24
+
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    start_time = time.time()
+    max_duration = RECORD_INTERVAL_HOURS * 3600
+
+    while time.time() - start_time < max_duration and recording:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        out.write(frame)
+
+    cap.release()
+    if out:
+        out.release()
+    print(f"Camera {camera_id} stopped recording.")
+
+# Scheduler
+
+def schedule_recording():
+    global recording
+    while True:
+        now = datetime.datetime.now()
+        if now.hour in [0, 12] and now.minute == 0:
+            if not recording:
+                recording = True
+                threading.Thread(target=record_all).start()
+        time.sleep(60)  # check every minute
+
+# Manage multiple cameras
+
+def record_all():
+    global recording
+    threading.Thread(target=record_from_camera, args=(CAMERA_1_INDEX, 1)).start()
+    threading.Thread(target=record_from_camera, args=(CAMERA_2_INDEX, 2)).start()
+    duration = RECORD_INTERVAL_HOURS * 3600
+    time.sleep(duration)
+    recording = False
+    print("Recording cycle completed.")
+
+# Show feed
+
+def show_feed(camera_id):
+    index = CAMERA_1_INDEX if camera_id == 1 else CAMERA_2_INDEX
+
+    if camera_feeds[camera_id] is not None:
+        camera_feeds[camera_id] = None
+        return
+
+    def run():
+        cap = cv2.VideoCapture(index)
+        if not cap.isOpened():
+            messagebox.showerror("Error", f"Camera {camera_id} not available.")
+            return
+
+        camera_feeds[camera_id] = True
+        window_name = f"Camera {camera_id} Feed"
+
+        while camera_feeds[camera_id]:
             ret, frame = cap.read()
             if not ret:
                 break
-            cv2.imshow(title, frame)
+            resized = cv2.resize(frame, (640, 480))
+            cv2.imshow(window_name, resized)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
+
+        camera_feeds[camera_id] = None
         cap.release()
-        cv2.destroyWindow(title)
-        if cam_index in feed_windows:
-            del feed_windows[cam_index]
+        cv2.destroyWindow(window_name)
 
-    feed_windows[cam_index] = True
-    threading.Thread(target=show_feed).start()
+    threading.Thread(target=run).start()
 
+# GUI
 
-# === RECORDING FUNCTIONALITY ===
-def record_camera(cam_index):
-    global recording
-    recording = True
-    while recording:
-        start_time = datetime.now()
-        end_time = start_time + timedelta(hours=RECORD_INTERVAL_HOURS)
-        filename = f"camera_{cam_index + 1}_{start_time.strftime('%Y-%m-%d_%H-%M')}.mp4"
-        out_path = os.path.join(OUTPUT_DIR, filename)
-
-        cap = cv2.VideoCapture(cam_index)
-        fourcc = cv2.VideoWriter_fourcc(*'H264')
-        out = cv2.VideoWriter(out_path, fourcc, 24.0, (1280, 720))
-
-        while datetime.now() < end_time and recording:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            out.write(frame)
-        out.release()
-        cap.release()
-
-        delete_old_files()
-
-
-def delete_old_files():
-    for file in os.listdir(OUTPUT_DIR):
-        full_path = os.path.join(OUTPUT_DIR, file)
-        if os.path.isfile(full_path):
-            ctime = os.path.getctime(full_path)
-            if time.time() - ctime > DELETE_AFTER_DAYS * 86400:
-                os.remove(full_path)
-
-
-def start_recording():
-    threading.Thread(target=record_camera, args=(CAMERA_1_INDEX,), daemon=True).start()
-    threading.Thread(target=record_camera, args=(CAMERA_2_INDEX,), daemon=True).start()
-    status_lbl.config(text="Recording: ON", fg="green")
-
-
-def stop_recording():
-    global recording
-    recording = False
-    status_lbl.config(text="Recording: OFF", fg="red")
-
-
-# === GUI ===
-root = Tk()
+root = tk.Tk()
 root.title("Security Camera System")
 root.geometry("400x300")
 
-btn_cam1 = Button(root, text="Show Camera Feed 1", command=lambda: toggle_feed(CAMERA_1_INDEX, "Camera 1"))
-btn_cam1.pack(pady=5)
+btn1 = tk.Button(root, text="Show Camera 1 Feed", command=lambda: show_feed(1))
+btn1.pack(pady=5)
 
-label_cam1 = Label(root, text="Camera 1: Checking...", fg="gray")
-label_cam1.pack()
+btn2 = tk.Button(root, text="Show Camera 2 Feed", command=lambda: show_feed(2))
+btn2.pack(pady=5)
 
-btn_cam2 = Button(root, text="Show Camera Feed 2", command=lambda: toggle_feed(CAMERA_2_INDEX, "Camera 2"))
-btn_cam2.pack(pady=5)
+cam1_status = tk.Label(root, text="Camera 1: Checking...")
+cam1_status.pack(pady=2)
 
-label_cam2 = Label(root, text="Camera 2: Checking...", fg="gray")
-label_cam2.pack()
+cam2_status = tk.Label(root, text="Camera 2: Checking...")
+cam2_status.pack(pady=2)
 
-status_lbl = Label(root, text="Recording: OFF", fg="red")
-status_lbl.pack(pady=10)
+recording_status = tk.Label(root, text="Recording: No")
+recording_status.pack(pady=5)
 
-btn_start = Button(root, text="Start Recording", command=start_recording)
-btn_start.pack(pady=5)
+def update_gui():
+    update_status()
+    recording_status.config(text=f"Recording: {'Yes' if recording else 'No'}")
+    root.after(5000, update_gui)  # Update every 5 seconds
 
-btn_stop = Button(root, text="Stop Recording", command=stop_recording)
-btn_stop.pack(pady=5)
+btn_open = tk.Button(root, text="📁 Open Folder", command=open_folder)
+btn_open.pack(pady=10)
 
-# Check camera status on launch
-threading.Thread(target=lambda: check_camera_status(CAMERA_1_INDEX, label_cam1), daemon=True).start()
-threading.Thread(target=lambda: check_camera_status(CAMERA_2_INDEX, label_cam2), daemon=True).start()
+update_gui()
+
+# Start scheduler thread
+threading.Thread(target=schedule_recording, daemon=True).start()
 
 root.mainloop()
