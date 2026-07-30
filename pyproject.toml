@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "security-camera"
+version = "0.1.0"
+description = "Low-overhead, systemd-managed dual RTSP camera recorder"
+requires-python = ">=3.11"
+dependencies = [
+  "Flask>=3.0,<4",
+  "Flask-WTF>=1.2,<2",
+  "argon2-cffi>=23.1,<24",
+  "requests>=2.31,<3",
+  "google-auth>=2.29,<3",
+  "google-auth-oauthlib>=1.2,<2",
+  "gunicorn>=22,<24",
+]
+
+[project.scripts]
+security-camera = "app.main:main"
+
+[tool.setuptools]
+packages = ["app", "app.recorder", "app.storage", "app.archive", "app.dashboard", "app.live_view"]
+
+[tool.setuptools.package-data]
+"app.dashboard" = ["templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
