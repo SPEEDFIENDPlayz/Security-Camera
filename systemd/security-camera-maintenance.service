@@ -1,0 +1,16 @@
+[Unit]
+Description=Security camera retention and reconciliation
+After=security-camera-recorder.service
+
+[Service]
+Type=oneshot
+User=securitycam
+Group=securitycam
+Environment=SECURITY_CAMERA_CONFIG=/etc/security-camera/config.toml
+WorkingDirectory=/opt/security-camera
+ExecStart=/opt/security-camera/.venv/bin/security-camera maintenance
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/security-camera /srv/security

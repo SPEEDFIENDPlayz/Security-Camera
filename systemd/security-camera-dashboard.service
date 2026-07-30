@@ -1,0 +1,21 @@
+[Unit]
+Description=Security camera dashboard
+After=network-online.target
+
+[Service]
+Type=simple
+User=securitycam
+Group=securitycam
+Environment=SECURITY_CAMERA_CONFIG=/etc/security-camera/config.toml
+WorkingDirectory=/opt/security-camera
+ExecStart=/opt/security-camera/.venv/bin/gunicorn -c app/gunicorn_conf.py app.wsgi:app
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/security-camera
+
+[Install]
+WantedBy=multi-user.target

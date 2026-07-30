@@ -1,0 +1,24 @@
+[Unit]
+Description=Security camera RTSP recorder
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=securitycam
+Group=securitycam
+Environment=SECURITY_CAMERA_CONFIG=/etc/security-camera/config.toml
+WorkingDirectory=/opt/security-camera
+ExecStart=/opt/security-camera/.venv/bin/security-camera recorder
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+RuntimeDirectory=security-camera
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/security-camera /srv/security
+
+[Install]
+WantedBy=multi-user.target

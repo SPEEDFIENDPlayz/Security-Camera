@@ -1,0 +1,22 @@
+[Unit]
+Description=Security camera archive and Google Drive worker
+After=network-online.target security-camera-recorder.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=securitycam
+Group=securitycam
+Environment=SECURITY_CAMERA_CONFIG=/etc/security-camera/config.toml
+WorkingDirectory=/opt/security-camera
+ExecStart=/opt/security-camera/.venv/bin/security-camera archive
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/security-camera /srv/security
+
+[Install]
+WantedBy=multi-user.target

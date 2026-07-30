@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+config/config.toml
+config/google-token.json
+*.db

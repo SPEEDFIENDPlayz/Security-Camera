@@ -1,0 +1,68 @@
+[general]
+data_dir = "/var/lib/security-camera"
+timezone = "America/Los_Angeles"
+ffmpeg = "/usr/bin/ffmpeg"
+ffprobe = "/usr/bin/ffprobe"
+retention_hours = 168
+expected_segment_gib = 8
+
+[storage.recording_a]
+path = "/srv/security/recording-a"
+fs_uuid = "REPLACE-WITH-FILESYSTEM-UUID"
+source = "/dev/disk/by-uuid/REPLACE-WITH-FILESYSTEM-UUID"
+reserve_gib = 15
+
+[storage.recording_b]
+path = "/srv/security/recording-b"
+fs_uuid = "REPLACE-WITH-FILESYSTEM-UUID"
+source = "/dev/disk/by-uuid/REPLACE-WITH-FILESYSTEM-UUID"
+reserve_gib = 15
+
+[storage.archive]
+path = "/srv/security/archive"
+fs_uuid = "REPLACE-WITH-FILESYSTEM-UUID"
+source = "/dev/disk/by-uuid/REPLACE-WITH-FILESYSTEM-UUID"
+reserve_gib = 50
+
+[[cameras]]
+id = "door"
+name = "Main Door Walkway"
+enabled = true
+main_url = "rtsp://USERNAME:PASSWORD@camera.example:554/main"
+sub_url = "rtsp://USERNAME:PASSWORD@camera.example:554/sub"
+transport = "tcp"
+timeout_us = 15000000
+reconnect_initial_seconds = 2
+reconnect_max_seconds = 60
+
+[[cameras]]
+id = "garage"
+name = "Outside Garage"
+enabled = true
+main_url = "rtsp://USERNAME:PASSWORD@camera.example:554/main"
+sub_url = "rtsp://USERNAME:PASSWORD@camera.example:554/sub"
+
+[dashboard]
+bind = "127.0.0.1"
+port = 8080
+# Set true only with tls_cert and tls_key configured.
+lan_enabled = false
+admin_password_hash = ""
+session_secret = "REPLACE-WITH-A-LONG-RANDOM-VALUE"
+tls_cert = ""
+tls_key = ""
+
+[preview]
+enabled = true
+default_timeout_seconds = 300
+maximum_timeout_seconds = 3600
+max_concurrent = 1
+allow_transcode_fallback = false
+
+[google]
+enabled = false
+folder_id = ""
+oauth_client_secrets = "/etc/security-camera/google-client.json"
+token_file = "/etc/security-camera/google-token.json"
+chunk_bytes = 8388608
+checksum = false
