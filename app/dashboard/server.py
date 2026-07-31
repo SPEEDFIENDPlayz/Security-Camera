@@ -80,7 +80,7 @@ def create_app(settings: Settings, db: Database) -> Flask:
     @authenticated
     def index():
         previews.reap()
-        mounts = [validate_mount(item) for item in (settings.recording_a, settings.recording_b, settings.archive)]
+        mounts = [validate_mount(item) for item in (settings.recording, settings.archive)]
         return render_template("index.html", mounts=mounts, clips=db.list_clips(10), config_cameras=settings.cameras, now=datetime.now(UTC))
 
     @app.get("/clips")

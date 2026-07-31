@@ -36,7 +36,7 @@ class ControlWorker:
                 temporary = self.config_path.with_suffix(".toml.next")
                 previous_settings = load(self.config_path)
                 candidate_settings = load(candidate)
-                if (previous_settings.recording_a != candidate_settings.recording_a or previous_settings.recording_b != candidate_settings.recording_b or previous_settings.archive != candidate_settings.archive):
+                if previous_settings.recording != candidate_settings.recording or previous_settings.archive != candidate_settings.archive:
                     raise ConfigError("storage mount changes require a controlled maintenance migration and are rejected while active")
                 shutil.copyfile(candidate, temporary)
                 with temporary.open("rb") as stream: os.fsync(stream.fileno())

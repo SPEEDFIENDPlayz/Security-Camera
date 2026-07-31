@@ -14,7 +14,7 @@ LOG = logging.getLogger(__name__)
 def run_retention(settings: Settings, db: Database) -> int:
     before = datetime.now(UTC) - timedelta(hours=settings.retention_hours)
     removed = 0
-    roots = {str(settings.recording_a.path.resolve()), str(settings.recording_b.path.resolve())}
+    roots = {str(settings.recording.path.resolve())}
     for clip in db.eligible_for_retention(before):
         path = Path(clip["recording_path"])
         try:

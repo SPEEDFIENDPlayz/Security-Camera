@@ -44,8 +44,7 @@ class Settings:
     ffprobe: str
     retention_hours: int
     expected_segment_bytes: int
-    recording_a: MountConfig
-    recording_b: MountConfig
+    recording: MountConfig
     archive: MountConfig
     cameras: tuple[CameraConfig, ...]
     dashboard: dict[str, Any]
@@ -113,8 +112,7 @@ def load(path: str | Path | None = None) -> Settings:
         ffmpeg=str(general.get("ffmpeg", "/usr/bin/ffmpeg")), ffprobe=str(general.get("ffprobe", "/usr/bin/ffprobe")),
         retention_hours=_positive(general.get("retention_hours", 168), "general.retention_hours"),
         expected_segment_bytes=_positive(general.get("expected_segment_gib", 8), "general.expected_segment_gib", 0) * 1024**3,
-        recording_a=_mount("recording_a", storage.get("recording_a", {})),
-        recording_b=_mount("recording_b", storage.get("recording_b", {})),
+        recording=_mount("recording", storage.get("recording", {})),
         archive=_mount("archive", storage.get("archive", {})), cameras=cameras,
         dashboard=copy.deepcopy(raw.get("dashboard", {})), preview=copy.deepcopy(raw.get("preview", {})), google=copy.deepcopy(raw.get("google", {})),
     )
