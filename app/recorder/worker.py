@@ -37,12 +37,11 @@ class RecorderWorker:
             self._process.terminate()
 
     def _select_mount(self):
-        candidates = (self.settings.recording_a, self.settings.recording_b)
-        for config in candidates:
-            status = validate_mount(config, self.settings.expected_segment_bytes)
-            if status.available and status.writable and not status.reason:
-                return config
-            self.db.health("storage", "critical", f"{config.name} unavailable: {status.reason}")
+        config = self.settings.recording
+        status = validate_mount(config, self.settings.expected_segment_bytes)
+        if status.available and status.writable and not status.reason:
+            return config
+        self.db.health("storage", "critical", f"{config.name} unavailable: {status.reason}")
         return None
 
     def run(self) -> None:

@@ -43,7 +43,7 @@ def main() -> None:
     if args.command == "recorder": run_recorder(settings, db)
     elif args.command == "archive": ArchiveWorker(settings, db).loop()
     elif args.command == "maintenance":
-        for mount in (settings.recording_a, settings.recording_b, settings.archive):
+        for mount in (settings.recording, settings.archive):
             status = validate_mount(mount)
             if not (status.available and status.writable and not status.reason):
                 db.health("storage", "critical", f"{mount.name} unavailable: {status.reason}")

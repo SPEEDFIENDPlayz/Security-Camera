@@ -4,7 +4,8 @@ This Debian 13 project records RTSP cameras with FFmpeg direct stream copy, main
 
 ## Safety model
 
-- Recording Drive A is preferred; B is selected only for a new segment when A cannot meet the configured reserve and estimated-segment admission check.
+- One configured 2 TB USB disk is the sole recording target. If it is unavailable, read-only, or below its reserve, new segments pause and retry; there is no recording spillover disk.
+- A separate configured disk is the archive target. Both disks are selected at boot by their configured mount paths and filesystem UUIDs in TOML, and every write revalidates the active mount identity.
 - The archive drive is a separate, indefinitely retained local copy. An archive job protects its original source until a copied, fsynced, size-checked, `ffprobe`-validated archive file has been atomically published.
 - The application verifies every configured mount against its active mount and expected UUID before writing. An unmounted directory is never treated as storage.
 - The archive worker is the only process that copies/removes archive files. The maintenance worker is the only process that executes retention deletion. The dashboard only queues jobs.
@@ -19,7 +20,7 @@ This Debian 13 project records RTSP cameras with FFmpeg direct stream copy, main
 5. Run `sudo systemctl restart security-camera-recorder security-camera-archive security-camera-dashboard security-camera-control`.
 6. Inspect `sudo ./scripts/health_check.sh` and `journalctl -u security-camera-recorder -f`.
 
-The supplied unit files use `/srv/security/...`; either mount disks there or update both TOML and unit `ReadWritePaths` together.
+The supplied unit files use `/srv/security/...`; mount the 2 TB recorder at `/srv/security/recording` and the archive disk at `/srv/security/archive`, or update the TOML and unit `ReadWritePaths` together. The application validates both mounts during startup and maintenance and will never write through an unmounted mount-point directory.
 
 ## Google Drive
 

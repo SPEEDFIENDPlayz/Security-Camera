@@ -6,14 +6,8 @@ ffprobe = "/usr/bin/ffprobe"
 retention_hours = 168
 expected_segment_gib = 8
 
-[storage.recording_a]
-path = "/srv/security/recording-a"
-fs_uuid = "REPLACE-WITH-FILESYSTEM-UUID"
-source = "/dev/disk/by-uuid/REPLACE-WITH-FILESYSTEM-UUID"
-reserve_gib = 15
-
-[storage.recording_b]
-path = "/srv/security/recording-b"
+[storage.recording]
+path = "/srv/security/recording"
 fs_uuid = "REPLACE-WITH-FILESYSTEM-UUID"
 source = "/dev/disk/by-uuid/REPLACE-WITH-FILESYSTEM-UUID"
 reserve_gib = 15

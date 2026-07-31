@@ -15,7 +15,7 @@ def test_calendar_boundary_is_noon_in_configured_zone():
 
 def test_archive_queue_protects_source(tmp_path: Path):
     db = Database(tmp_path / "state.db"); db.initialize()
-    clip_id = db.create_clip("door", tmp_path / "clip.mkv", "recording_a", datetime.now(UTC), "UTC")
+    clip_id = db.create_clip("door", tmp_path / "clip.mkv", "recording", datetime.now(UTC), "UTC")
     db.complete_clip(clip_id, datetime.now(UTC), 12)
     db.queue_archive(clip_id)
     clip = db.get_clip(clip_id)
@@ -25,7 +25,7 @@ def test_archive_queue_protects_source(tmp_path: Path):
 
 def test_job_can_only_be_claimed_once(tmp_path: Path):
     db = Database(tmp_path / "state.db"); db.initialize()
-    clip_id = db.create_clip("door", tmp_path / "clip.mkv", "recording_a", datetime.now(UTC), "UTC")
+    clip_id = db.create_clip("door", tmp_path / "clip.mkv", "recording", datetime.now(UTC), "UTC")
     db.complete_clip(clip_id, datetime.now(UTC), 12); db.queue_archive(clip_id)
     assert db.claim("archive", "one") is not None
     assert db.claim("archive", "two") is None
