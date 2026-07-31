@@ -1,59 +1,34 @@
 # Security Camera Appliance
 
-This Debian 13 project records RTSP cameras with FFmpeg direct stream copy, maintains aligned local-time MKV clips, archives selected clips to a third verified disk, and uploads the verified archive copy to Google Drive. It is designed to run under systemd without Xfce or any desktop session.
+This Debian 13 appliance records two RTSP cameras directly to one configured recording drive and copies selected clips to a separate local archive drive. It uses FFmpeg stream copy, never re-encodes normal recordings, and runs unattended through systemd.
+
+## First-time setup
+
+1. Mount the 2 TB recording drive and the separate archive drive in Debian. The wizard does not format drives, create mounts, or modify `/etc/fstab`.
+2. Download and unzip this repository on the Debian Xfce desktop.
+3. Double-click `setup.sh` and choose **Run**, then approve the administrator password prompt. If the file manager asks, choose **Run in Terminal**; the graphical wizard opens automatically.
+4. Select the two already-mounted drives, enter each camera’s RTSP details, test both streams, set the dashboard password, and finish setup.
+
+The wizard records drive mount paths, UUIDs, and device sources in protected `/etc/security-camera/config.toml`. It verifies the mount identity before every recording or archive write, preventing writes into an unmounted directory on the Debian root filesystem.
+
+Re-run `setup.sh` whenever you need to reconfigure cameras, drives, or dashboard access. Existing passwords remain masked; leave a password blank to keep it unchanged.
+
+## Dashboard
+
+After setup, open `http://127.0.0.1:8080` on the Debian computer. It shows storage/camera health, lets you archive finalized clips to the separate archive drive, and provides optional low-resolution on-demand previews.
+
+The default dashboard is local-only. LAN mode requires a dashboard password and TLS certificate/key paths supplied in the wizard. Never expose the dashboard directly to the public internet.
 
 ## Safety model
 
-- One configured 2 TB USB disk is the sole recording target. If it is unavailable, read-only, or below its reserve, new segments pause and retry; there is no recording spillover disk.
-- A separate configured disk is the archive target. Both disks are selected at boot by their configured mount paths and filesystem UUIDs in TOML, and every write revalidates the active mount identity.
-- The archive drive is a separate, indefinitely retained local copy. An archive job protects its original source until a copied, fsynced, size-checked, `ffprobe`-validated archive file has been atomically published.
-- The application verifies every configured mount against its active mount and expected UUID before writing. An unmounted directory is never treated as storage.
-- The archive worker is the only process that copies/removes archive files. The maintenance worker is the only process that executes retention deletion. The dashboard only queues jobs.
-- FFmpeg records with `-c copy`. Preview starts only after a Show Feed click and uses a sub-stream HLS remux (`-c copy`); recording never decodes or transcodes frames.
+- The single recording drive is the only normal recording destination. If it is missing, read-only, or below its reserve, new recording segments pause and retry.
+- Archived clips are copied, fsynced, size-checked, ffprobe-validated, atomically published on the archive disk, then removed from recording storage. Archive-drive clips are retained until you delete them manually.
+- Seven-day retention applies only to eligible finalized clips on the recording disk. It never deletes archived clips.
+- Google Drive upload is intentionally not part of this version.
 
-## Install
-
-1. Install Debian, mount all three disks at their permanent paths, and identify each filesystem UUID with `blkid`.
-2. Copy this repository to the Debian host. Run `sudo ./scripts/install.sh` from its root.
-3. Edit `/etc/security-camera/config.toml`. Replace every UUID, source, path, camera URL, secret, and `session_secret`. Do not place real configuration in Git.
-4. Grant `securitycam` group access to each mounted recording/archive directory, without making the disks world-writable.
-5. Run `sudo systemctl restart security-camera-recorder security-camera-archive security-camera-dashboard security-camera-control`.
-6. Inspect `sudo ./scripts/health_check.sh` and `journalctl -u security-camera-recorder -f`.
-
-The supplied unit files use `/srv/security/...`; mount the 2 TB recorder at `/srv/security/recording` and the archive disk at `/srv/security/archive`, or update the TOML and unit `ReadWritePaths` together. The application validates both mounts during startup and maintenance and will never write through an unmounted mount-point directory.
-
-## Google Drive
-
-Create a Google Cloud **Desktop** OAuth client, enable Drive API, copy its client JSON to `/etc/security-camera/google-client.json` with `root:securitycam` ownership and `0640` permissions, configure a target folder ID, then run:
+## Health checks
 
 ```sh
-sudo -u securitycam SECURITY_CAMERA_CONFIG=/etc/security-camera/config.toml /opt/security-camera/.venv/bin/security-camera authorize-drive
-```
-
-Complete the local browser consent screen. The resulting protected token file enables resumable uploads. The upload worker uses `drive.file` and a stable clip UUID app property to avoid duplicates.
-
-## Dashboard and LAN safety
-
-The default dashboard listens on `127.0.0.1:8080`. Set a non-empty Argon2id `admin_password_hash` even in local-only mode: it is required to delete an archive or replace configuration. To enable LAN access, also set `lan_enabled = true`, TLS certificate/key paths, and a specific LAN address where possible. Restrict the port to the trusted subnet with nftables/ufw; never port-forward it to the public Internet.
-
-Generate a password hash with:
-
-```sh
-/opt/security-camera/.venv/bin/python -c "from argon2 import PasswordHasher; print(PasswordHasher().hash(input('Password: ')))"
-```
-
-## Operations
-
-- Archive eligible clips in the dashboard. Do not remove original files manually while an archive job is active or failed.
-- Archive deletion requires the dashboard administrator password and typing `DELETE`; it cancels a live upload before deletion. Cloud metadata is retained in SQLite.
-- Retention runs hourly and removes only unprotected finalized/interrupt clips older than 168 hours. It never removes archive-drive clips.
-- Run `security-camera maintenance` manually after an unclean shutdown to reconcile in-progress recordings; the timer also does this hourly.
-
-## Tests
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-pytest -q
+sudo bash scripts/health_check.sh
+sudo journalctl -u security-camera-recorder.service -f
 ```

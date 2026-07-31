@@ -49,7 +49,6 @@ class Settings:
     cameras: tuple[CameraConfig, ...]
     dashboard: dict[str, Any]
     preview: dict[str, Any]
-    google: dict[str, Any]
 
 
 def _positive(value: Any, name: str, minimum: int = 1) -> int:
@@ -114,7 +113,7 @@ def load(path: str | Path | None = None) -> Settings:
         expected_segment_bytes=_positive(general.get("expected_segment_gib", 8), "general.expected_segment_gib", 0) * 1024**3,
         recording=_mount("recording", storage.get("recording", {})),
         archive=_mount("archive", storage.get("archive", {})), cameras=cameras,
-        dashboard=copy.deepcopy(raw.get("dashboard", {})), preview=copy.deepcopy(raw.get("preview", {})), google=copy.deepcopy(raw.get("google", {})),
+        dashboard=copy.deepcopy(raw.get("dashboard", {})), preview=copy.deepcopy(raw.get("preview", {})),
     )
 
 

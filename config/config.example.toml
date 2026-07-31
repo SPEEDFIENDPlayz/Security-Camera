@@ -23,7 +23,7 @@ id = "door"
 name = "Main Door Walkway"
 enabled = true
 main_url = "rtsp://USERNAME:PASSWORD@camera.example:554/main"
-sub_url = "rtsp://USERNAME:PASSWORD@camera.example:554/sub"
+sub_url = ""
 transport = "tcp"
 timeout_us = 15000000
 reconnect_initial_seconds = 2
@@ -34,7 +34,11 @@ id = "garage"
 name = "Outside Garage"
 enabled = true
 main_url = "rtsp://USERNAME:PASSWORD@camera.example:554/main"
-sub_url = "rtsp://USERNAME:PASSWORD@camera.example:554/sub"
+sub_url = ""
+transport = "tcp"
+timeout_us = 15000000
+reconnect_initial_seconds = 2
+reconnect_max_seconds = 60
 
 [dashboard]
 bind = "127.0.0.1"
@@ -52,11 +56,3 @@ default_timeout_seconds = 300
 maximum_timeout_seconds = 3600
 max_concurrent = 1
 allow_transcode_fallback = false
-
-[google]
-enabled = false
-folder_id = ""
-oauth_client_secrets = "/etc/security-camera/google-client.json"
-token_file = "/etc/security-camera/google-token.json"
-chunk_bytes = 8388608
-checksum = false

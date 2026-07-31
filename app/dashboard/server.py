@@ -2,15 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from functools import wraps
-from pathlib import Path
-from uuid import uuid4
 
 from argon2 import PasswordHasher
 from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
 from flask_wtf.csrf import CSRFProtect
 
 from app.config import Settings
-from app.config import load as load_config
 from app.database import Database
 from app.storage.mounts import validate_mount
 from app.live_view.manager import PreviewManager
@@ -102,27 +99,13 @@ def create_app(settings: Settings, db: Database) -> Flask:
     @reauthenticated
     def delete_archive(clip_id: str):
         if request.form.get("confirm") != "DELETE": abort(400, "explicit DELETE confirmation required")
-        try: db.queue_delete_archive(clip_id); flash("Archive deletion queued; uploads will be stopped safely", "ok")
+        try: db.queue_delete_archive(clip_id); flash("Archive deletion queued", "ok")
         except ValueError as exc: flash(str(exc), "error")
         return redirect(url_for("clips"))
 
-    @app.route("/settings", methods=["GET", "POST"])
+    @app.get("/settings")
     @authenticated
-    @reauthenticated
-    def settings_upload():
-        if request.method == "POST":
-            uploaded = request.files.get("config")
-            if not uploaded or not uploaded.filename.endswith(".toml"):
-                flash("Upload a TOML configuration file", "error")
-            else:
-                candidate_dir = settings.data_dir / "config-candidates"; candidate_dir.mkdir(parents=True, exist_ok=True)
-                candidate = candidate_dir / f"{uuid4()}.toml"
-                uploaded.save(candidate); candidate.chmod(0o600)
-                try:
-                    load_config(candidate); db.queue_config(str(candidate)); flash("Configuration validation passed; apply job queued", "ok")
-                except Exception as exc:
-                    candidate.unlink(missing_ok=True); flash(f"Configuration rejected: {exc}", "error")
-            return redirect(url_for("settings_upload"))
+    def settings():
         return render_template("settings.html", dashboard=settings.dashboard, cameras=settings.cameras)
 
     @app.post("/preview/<camera_id>/start")

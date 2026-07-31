@@ -56,6 +56,10 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as con:
             con.executescript(SCHEMA)
+            # Google Drive support was removed. Preserve old metadata for audit,
+            # but stop all unfinished cloud work and normalize local ownership.
+            con.execute("UPDATE jobs SET state='Cancelled', error='Google Drive support removed', lease_token=NULL, lease_until=NULL, updated_at=? WHERE kind='upload' AND state NOT IN ('Complete','Cancelled')", (utcnow(),))
+            con.execute("UPDATE clips SET state='Archived locally', updated_at=? WHERE state='Uploaded verified'", (utcnow(),))
 
     @contextlib.contextmanager
     def immediate(self) -> Iterator[sqlite3.Connection]:
@@ -103,14 +107,7 @@ class Database:
             if not row or not row["archive_path"] or row["state"] == "Deleted":
                 raise ValueError("archive is not available")
             con.execute("UPDATE clips SET state='Delete pending', updated_at=? WHERE id=?", (utcnow(), clip_id))
-            con.execute("UPDATE jobs SET state='Cancelled', updated_at=? WHERE clip_id=? AND kind='upload' AND state NOT IN ('Complete','Cancelled')", (utcnow(), clip_id))
             con.execute("INSERT INTO jobs(id,kind,clip_id,state,created_at,updated_at) VALUES(?,?,?,?,?,?)", (job_id, "delete_archive", clip_id, "Queued", utcnow(), utcnow()))
-        return job_id
-
-    def queue_config(self, candidate: str) -> str:
-        job_id = str(uuid.uuid4())
-        with self.connect() as con:
-            con.execute("INSERT INTO jobs(id,kind,state,payload,created_at,updated_at) VALUES(?,?,?,?,?,?)", (job_id, "config", "Queued", json.dumps({"candidate": candidate}), utcnow(), utcnow()))
         return job_id
 
     def claim(self, kind: str, worker: str, lease_seconds: int = 120) -> sqlite3.Row | None:

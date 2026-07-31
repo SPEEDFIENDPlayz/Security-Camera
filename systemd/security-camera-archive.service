@@ -1,5 +1,5 @@
 [Unit]
-Description=Security camera archive and Google Drive worker
+Description=Security camera local archive worker
 After=network-online.target security-camera-recorder.service
 Wants=network-online.target
 
