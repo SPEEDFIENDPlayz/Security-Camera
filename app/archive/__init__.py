@@ -1,1 +1,1 @@
-"""Archive transfer and cloud upload."""
+"""Verified local archive transfer."""

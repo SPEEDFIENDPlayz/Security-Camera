@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import os
 import shutil
@@ -9,21 +7,12 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.archive.google_drive import DriveUploader, UploadCancelled
 from app.config import Settings
 from app.database import Database
 from app.recorder.ffmpeg import probe
 from app.storage.mounts import MountError, safe_child, validate_mount
 
 LOG = logging.getLogger(__name__)
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 class ArchiveWorker:
@@ -61,8 +50,6 @@ class ArchiveWorker:
                 raise IOError("archive copy size mismatch")
             if not probe(self.settings, temp):
                 raise IOError("ffprobe rejected archive copy")
-            if bool(self.settings.google.get("checksum", False)) and _sha256(source) != _sha256(temp):
-                raise IOError("archive checksum mismatch")
             self.db.transition_job(job["id"], token, "Publishing")
             os.replace(temp, final)
             directory_fd = os.open(final.parent, os.O_DIRECTORY)
@@ -74,7 +61,6 @@ class ArchiveWorker:
             source.unlink()
             with self.db.immediate() as con:
                 con.execute("UPDATE clips SET recording_path=NULL,protected=1,updated_at=? WHERE id=?", (datetime.now(UTC).isoformat(), clip["id"]))
-                con.execute("INSERT INTO jobs(id,kind,clip_id,state,created_at,updated_at) VALUES(?,?,?,?,?,?)", (f"upload:{clip['id']}", "upload", clip["id"], "Queued", datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()))
             self.db.transition_job(job["id"], token, "Complete")
         except Exception as exc:
             LOG.exception("archive transfer failed for %s", clip["id"])
@@ -91,11 +77,6 @@ class ArchiveWorker:
         if not clip or not clip["archive_path"]:
             self.db.transition_job(job["id"], token, "Failed", error="archive path unavailable"); return
         try:
-            with self.db.connect() as con:
-                active = con.execute("SELECT 1 FROM jobs WHERE kind='upload' AND clip_id=? AND state='Cancelled' AND lease_until>?", (clip["id"], datetime.now(UTC).isoformat())).fetchone()
-            if active:
-                self.db.transition_job(job["id"], token, "Retry waiting", error="waiting for upload reader to release file", retry_seconds=5)
-                return
             status = validate_mount(self.settings.archive)
             if not (status.available and status.writable and not status.reason):
                 raise MountError(status.reason)
@@ -107,30 +88,10 @@ class ArchiveWorker:
         except Exception as exc:
             self._retry(job, token, exc)
 
-    def process_upload(self, job, token: str) -> None:
-        clip = self.db.get_clip(job["clip_id"])
-        if not clip or not clip["archive_path"]:
-            self.db.transition_job(job["id"], token, "Cancelled", error="archive copy unavailable"); return
-        if not self.settings.google.get("enabled", False):
-            self.db.transition_job(job["id"], token, "Retry waiting", error="Google Drive disabled", retry_seconds=3600); return
-        try:
-            self.db.transition_job(job["id"], token, "Uploading")
-            result = DriveUploader(self.settings, self.db).upload(job, clip)
-            if not self.db.owns_job(job["id"], token):
-                return
-            with self.db.connect() as con:
-                con.execute("UPDATE clips SET state='Uploaded verified',drive_file_id=?,drive_size_bytes=?,drive_md5=?,updated_at=? WHERE id=?", (result["id"], result.get("size"), result.get("md5Checksum"), datetime.now(UTC).isoformat(), clip["id"]))
-            self.db.transition_job(job["id"], token, "Complete", payload=result)
-        except UploadCancelled:
-            # Delete request owns final cleanup. Do not touch clip state or revive this job.
-            return
-        except Exception as exc:
-            self._retry(job, token, exc)
-
     def loop(self) -> None:
         while True:
             found = False
-            for kind, method in (("archive", self.process_archive), ("delete_archive", self.process_delete), ("upload", self.process_upload)):
+            for kind, method in (("archive", self.process_archive), ("delete_archive", self.process_delete)):
                 job = self.db.claim(kind, "archive")
                 if job:
                     found = True; method(job, job["lease_token"])
