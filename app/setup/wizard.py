@@ -14,6 +14,12 @@ from app.config import MountConfig
 from app.storage.mounts import validate_mount
 
 CONFIG_PATH = Path("/etc/security-camera/config.toml")
+SYSTEMD_ROOT = Path("/etc/systemd/system")
+STORAGE_SERVICES = (
+    "security-camera-recorder.service",
+    "security-camera-archive.service",
+    "security-camera-maintenance.service",
+)
 
 
 @dataclass(frozen=True)
@@ -107,6 +113,54 @@ def _write_config(content: str) -> None:
         directory_fd = os.open(CONFIG_PATH.parent, os.O_DIRECTORY)
         try: os.fsync(directory_fd)
         finally: os.close(directory_fd)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _systemd_escape_path(path: str) -> str:
+    return path.replace("\\", "\\\\").replace(" ", "\\x20").replace("\t", "\\x09").replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _storage_override_paths() -> list[Path]:
+    return [SYSTEMD_ROOT / f"{service}.d" / "storage.conf" for service in STORAGE_SERVICES]
+
+
+def _write_storage_overrides(recording: str, archive: str) -> None:
+    content = "[Service]\nReadWritePaths=\nReadWritePaths=/var/lib/security-camera /srv/security {} {}\n".format(
+        _systemd_escape_path(recording), _systemd_escape_path(archive)
+    )
+    for path in _storage_override_paths():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(prefix="storage.", suffix=".conf", dir=path.parent)
+        temp = Path(name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush(); os.fsync(handle.fileno())
+            os.chmod(temp, 0o644)
+            os.replace(temp, path)
+        finally:
+            temp.unlink(missing_ok=True)
+
+
+def _restore_file(path: Path, content: bytes | None) -> None:
+    if content is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix="restore.", suffix=path.suffix, dir=path.parent)
+    temp = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush(); os.fsync(handle.fileno())
+        if path == CONFIG_PATH:
+            import grp
+            os.chown(temp, 0, grp.getgrnam("securitycam").gr_gid)
+            os.chmod(temp, 0o640)
+        else:
+            os.chmod(temp, 0o644)
+        os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
 
@@ -260,6 +314,16 @@ class SetupWizard:
                 self.status.configure(text="Set and confirm an administrator password of at least 8 characters."); return
             if self.vars["lan"].get() and (not self.vars["tls_cert"].get() or not self.vars["tls_key"].get()):
                 self.status.configure(text="LAN access requires TLS certificate and key paths."); return
+            if not self.vars["lan"].get() and self.vars["bind"].get().strip() not in {"127.0.0.1", "::1", "localhost"}:
+                self.status.configure(text="Local-only mode must bind to localhost."); return
+            try:
+                port = int(self.vars["port"].get())
+            except ValueError:
+                self.status.configure(text="Dashboard port must be a number between 1 and 65535."); return
+            if not 1 <= port <= 65535:
+                self.status.configure(text="Dashboard port must be between 1 and 65535."); return
+            if self.vars["lan"].get() and (not Path(self.vars["tls_cert"].get()).is_file() or not Path(self.vars["tls_key"].get()).is_file()):
+                self.status.configure(text="LAN TLS certificate and key must point to existing files."); return
         if self.page == 5:
             self._apply(); return
         self.page += 1; self._render()
@@ -287,13 +351,38 @@ class SetupWizard:
         return "\n".join(line for line in lines if line is not None)
 
     def _apply(self) -> None:
+        tracked = [CONFIG_PATH, *_storage_override_paths()]
+        previous = {path: path.read_bytes() if path.exists() else None for path in tracked}
+        services = (*STORAGE_SERVICES, "security-camera-dashboard.service", "security-camera-maintenance.timer")
+        was_active: dict[str, bool] = {}
+        was_enabled: dict[str, bool] = {}
         try:
-            for service in ("security-camera-recorder.service", "security-camera-archive.service", "security-camera-dashboard.service"):
+            was_active = {
+                service: subprocess.run(["systemctl", "is-active", "--quiet", service], check=False, timeout=30).returncode == 0
+                for service in services
+            }
+            was_enabled = {
+                service: subprocess.run(["systemctl", "is-enabled", "--quiet", service], check=False, timeout=30).returncode == 0
+                for service in services
+            }
+            for service in services:
                 subprocess.run(["systemctl", "stop", service], check=False, timeout=30)
             _write_config(self._config_text())
+            recording, archive = self._selected_drive("recording"), self._selected_drive("archive")
+            if not recording or not archive:
+                raise RuntimeError("storage drives were not selected")
+            _write_storage_overrides(recording.mountpoint, archive.mountpoint)
             subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=30)
             subprocess.run(["systemctl", "enable", "--now", "security-camera-recorder.service", "security-camera-archive.service", "security-camera-dashboard.service", "security-camera-maintenance.timer"], check=True, timeout=60)
         except Exception as exc:
+            for path, content in previous.items():
+                _restore_file(path, content)
+            subprocess.run(["systemctl", "daemon-reload"], check=False, timeout=30)
+            for service, enabled in was_enabled.items():
+                subprocess.run(["systemctl", "enable" if enabled else "disable", service], check=False, timeout=30)
+            for service, active in was_active.items():
+                if active:
+                    subprocess.run(["systemctl", "start", service], check=False, timeout=30)
             self.messagebox.showerror("Setup failed", f"Configuration was not completed:\n{exc}"); return
         self.messagebox.showinfo("Setup complete", "Recording services are running. Open http://127.0.0.1:8080 on this computer.")
         self.root.destroy()

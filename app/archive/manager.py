@@ -26,38 +26,74 @@ class ArchiveWorker:
 
     def process_archive(self, job, token: str) -> None:
         clip = self.db.get_clip(job["clip_id"])
-        if not clip or not clip["recording_path"]:
+        if not clip:
             self.db.transition_job(job["id"], token, "Failed", error="source clip no longer exists"); return
-        source = Path(clip["recording_path"])
-        required = int(clip["size_bytes"] or source.stat().st_size if source.exists() else 0)
+        if not clip["recording_path"]:
+            if clip["archive_path"]:
+                try:
+                    archive_status = validate_mount(self.settings.archive, require_writable=False, enforce_reserve=False)
+                    published = safe_child(self.settings.archive.path, Path(clip["archive_path"]))
+                    if archive_status.available and not archive_status.reason and published.exists() and published.stat().st_size > 0 and probe(self.settings, published):
+                        self.db.transition_job(job["id"], token, "Complete")
+                        return
+                except MountError:
+                    pass
+            self.db.transition_job(job["id"], token, "Failed", error="source clip no longer exists"); return
+        try:
+            source = safe_child(self.settings.recording.path, Path(clip["recording_path"]))
+        except MountError as exc:
+            self.db.transition_job(job["id"], token, "Failed", error=str(exc)); return
+        required = int(clip["size_bytes"] or 0)
+        if not required and source.exists():
+            required = source.stat().st_size
         status = validate_mount(self.settings.archive, required)
         if not (status.available and status.writable and not status.reason):
             self._retry(job, token, f"archive mount unavailable: {status.reason}"); return
-        if not source.exists():
-            self._retry(job, token, "source file missing; preserving metadata for operator review"); return
         root = self.settings.archive.path
         final = root / "clips" / f"{clip['id']}.mkv"
         temp = root / "tmp" / f"{clip['id']}.mkv.partial"
-        self.db.transition_job(job["id"], token, "Copying")
+        try:
+            safe_child(root, final); safe_child(root, temp)
+        except MountError as exc:
+            self.db.transition_job(job["id"], token, "Failed", error=str(exc)); return
+        if not source.exists():
+            if final.exists() and final.stat().st_size > 0 and probe(self.settings, final):
+                with self.db.immediate() as con:
+                    con.execute("UPDATE clips SET state='Archived locally',archive_path=?,recording_path=NULL,protected=1,updated_at=? WHERE id=?", (str(final), datetime.now(UTC).isoformat(), clip["id"]))
+                self.db.transition_job(job["id"], token, "Complete")
+            else:
+                self._retry(job, token, "source file missing; preserving metadata for operator review")
+            return
+        source_status = validate_mount(self.settings.recording, require_writable=False, enforce_reserve=False)
+        if not source_status.available or source_status.reason:
+            self._retry(job, token, f"recording mount unavailable: {source_status.reason}"); return
+        if not self.db.transition_job(job["id"], token, "Copying"):
+            return
         try:
             final.parent.mkdir(parents=True, exist_ok=True); temp.parent.mkdir(parents=True, exist_ok=True)
-            safe_child(root, final); safe_child(root, temp)
             with source.open("rb") as src, temp.open("wb") as dst:
                 shutil.copyfileobj(src, dst, length=4 * 1024 * 1024)
                 dst.flush(); os.fsync(dst.fileno())
-            self.db.transition_job(job["id"], token, "Verifying")
+            if not self.db.transition_job(job["id"], token, "Verifying"):
+                return
             if source.stat().st_size != temp.stat().st_size:
                 raise IOError("archive copy size mismatch")
             if not probe(self.settings, temp):
                 raise IOError("ffprobe rejected archive copy")
-            self.db.transition_job(job["id"], token, "Publishing")
+            if not self.db.transition_job(job["id"], token, "Publishing"):
+                return
             os.replace(temp, final)
             directory_fd = os.open(final.parent, os.O_DIRECTORY)
             try: os.fsync(directory_fd)
             finally: os.close(directory_fd)
             with self.db.immediate() as con:
                 con.execute("UPDATE clips SET state='Archived locally',archive_path=?,updated_at=? WHERE id=?", (str(final), datetime.now(UTC).isoformat(), clip["id"]))
-            self.db.transition_job(job["id"], token, "Source deletion pending")
+            if not self.db.transition_job(job["id"], token, "Source deletion pending"):
+                return
+            delete_status = validate_mount(self.settings.recording, require_writable=True, enforce_reserve=False)
+            if not (delete_status.available and delete_status.writable and not delete_status.reason):
+                self._retry(job, token, f"recording mount unavailable for source deletion: {delete_status.reason}"); return
+            safe_child(self.settings.recording.path, source)
             source.unlink()
             with self.db.immediate() as con:
                 con.execute("UPDATE clips SET recording_path=NULL,protected=1,updated_at=? WHERE id=?", (datetime.now(UTC).isoformat(), clip["id"]))
@@ -74,10 +110,14 @@ class ArchiveWorker:
 
     def process_delete(self, job, token: str) -> None:
         clip = self.db.get_clip(job["clip_id"])
-        if not clip or not clip["archive_path"]:
+        if not clip:
+            self.db.transition_job(job["id"], token, "Failed", error="archive path unavailable"); return
+        if not clip["archive_path"] and clip["state"] == "Deleted":
+            self.db.transition_job(job["id"], token, "Complete"); return
+        if not clip["archive_path"]:
             self.db.transition_job(job["id"], token, "Failed", error="archive path unavailable"); return
         try:
-            status = validate_mount(self.settings.archive)
+            status = validate_mount(self.settings.archive, require_writable=True, enforce_reserve=False)
             if not (status.available and status.writable and not status.reason):
                 raise MountError(status.reason)
             path = safe_child(self.settings.archive.path, Path(clip["archive_path"]))

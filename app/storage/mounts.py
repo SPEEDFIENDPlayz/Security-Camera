@@ -27,9 +27,9 @@ def _unescape_mountinfo(value: str) -> str:
     return value.replace("\\040", " ").replace("\\011", "\t").replace("\\134", "\\")
 
 
-def _mountinfo(path: Path) -> tuple[str, str] | None:
+def _mountinfo(path: Path) -> tuple[str, str, bool] | None:
     target = str(path.resolve())
-    best: tuple[int, str, str] | None = None
+    best: tuple[int, str, str, bool] | None = None
     try:
         lines = Path("/proc/self/mountinfo").read_text().splitlines()
     except FileNotFoundError:
@@ -39,20 +39,28 @@ def _mountinfo(path: Path) -> tuple[str, str] | None:
         fields, post = left.split(), right.split()
         mount_point = _unescape_mountinfo(fields[4])
         if target == mount_point or target.startswith(mount_point.rstrip("/") + "/"):
-            candidate = (len(mount_point), post[1], post[0])
+            mount_options = set(fields[5].split(","))
+            super_options = set(post[2].split(",")) if len(post) > 2 else set()
+            candidate = (len(mount_point), post[1], post[0], "ro" in mount_options or "ro" in super_options)
             if best is None or candidate[0] > best[0]:
                 best = candidate
-    return (best[1], best[2]) if best else None
+    return (best[1], best[2], best[3]) if best else None
 
 
-def validate_mount(config: MountConfig, required_bytes: int = 0) -> MountStatus:
+def validate_mount(
+    config: MountConfig,
+    required_bytes: int = 0,
+    *,
+    require_writable: bool = True,
+    enforce_reserve: bool = True,
+) -> MountStatus:
     path = config.path
     if not path.exists() or not path.is_dir():
         return MountStatus(config, "", "", False, False, 0, 0, "mount point missing")
     info = _mountinfo(path)
     if not info:
         return MountStatus(config, "", "", False, False, 0, 0, "not an active mount")
-    source, fs_type = info
+    source, fs_type, mounted_read_only = info
     root_info = _mountinfo(Path("/"))
     if path.resolve() == Path("/") or (root_info and source == root_info[0]):
         return MountStatus(config, source, fs_type, False, False, 0, 0, "refusing root filesystem")
@@ -68,9 +76,11 @@ def validate_mount(config: MountConfig, required_bytes: int = 0) -> MountStatus:
     usage = os.statvfs(path)
     free, total = usage.f_bavail * usage.f_frsize, usage.f_blocks * usage.f_frsize
     writable = os.access(path, os.W_OK)
-    if not writable:
+    if mounted_read_only or not writable:
+        if not require_writable:
+            return MountStatus(config, source, fs_type, True, False, free, total)
         return MountStatus(config, source, fs_type, True, False, free, total, "mount is read-only")
-    if free < required_bytes + config.reserve_bytes:
+    if enforce_reserve and free < required_bytes + config.reserve_bytes:
         return MountStatus(config, source, fs_type, True, True, free, total, "insufficient free space including reserve")
     return MountStatus(config, source, fs_type, True, True, free, total)
 

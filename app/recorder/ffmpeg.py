@@ -17,8 +17,11 @@ def command(settings: Settings, camera: CameraConfig, output: Path, duration_sec
 
 
 def probe(settings: Settings, path: Path) -> bool:
-    result = subprocess.run(
-        [settings.ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", str(path)],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60, check=False,
-    )
+    try:
+        result = subprocess.run(
+            [settings.ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", str(path)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0 and bool(result.stdout.strip())

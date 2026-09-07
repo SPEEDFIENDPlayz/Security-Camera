@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from functools import wraps
+from urllib.parse import urlsplit
 
 from argon2 import PasswordHasher
 from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, session, url_for
@@ -20,6 +21,14 @@ def create_app(settings: Settings, db: Database) -> Flask:
     hasher = PasswordHasher()
     lan = bool(settings.dashboard.get("lan_enabled", False))
     previews = PreviewManager(settings)
+
+    def safe_next(value: str | None) -> str:
+        if not value:
+            return url_for("index")
+        parsed = urlsplit(value)
+        if parsed.scheme or parsed.netloc or "\\" in value or not value.startswith("/") or value.startswith("//"):
+            return url_for("index")
+        return value
 
     def authenticated(fn):
         @wraps(fn)
@@ -53,7 +62,7 @@ def create_app(settings: Settings, db: Database) -> Flask:
             if ok:
                 with db.connect() as con: con.execute("DELETE FROM login_failures WHERE ip=?", (ip,))
                 session.clear(); session["authenticated"] = True
-                return redirect(request.args.get("next") or url_for("index"))
+                return redirect(safe_next(request.args.get("next")))
             failures = (failure["failures"] if failure else 0) + 1
             blocked = (datetime.now(UTC) + timedelta(minutes=15)).isoformat() if failures >= 5 else None
             with db.connect() as con:
@@ -69,7 +78,7 @@ def create_app(settings: Settings, db: Database) -> Flask:
             except Exception: ok = False
             if ok:
                 session["reauth_until"] = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
-                return redirect(request.args.get("next") or url_for("index"))
+                return redirect(safe_next(request.args.get("next")))
             flash("Invalid password", "error")
         return render_template("login.html", title="Confirm administrator password")
 
@@ -84,7 +93,10 @@ def create_app(settings: Settings, db: Database) -> Flask:
     @authenticated
     def clips():
         previews.reap()
-        page = max(0, int(request.args.get("page", 0)))
+        try:
+            page = max(0, int(request.args.get("page", 0)))
+        except ValueError:
+            page = 0
         return render_template("clips.html", clips=db.list_clips(100, page * 100), page=page)
 
     @app.post("/clips/<clip_id>/archive")
@@ -105,7 +117,7 @@ def create_app(settings: Settings, db: Database) -> Flask:
 
     @app.get("/settings")
     @authenticated
-    def settings():
+    def settings_page():
         return render_template("settings.html", dashboard=settings.dashboard, cameras=settings.cameras)
 
     @app.post("/preview/<camera_id>/start")

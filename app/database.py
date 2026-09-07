@@ -115,7 +115,7 @@ class Database:
         now = datetime.now(UTC)
         until = (now + timedelta(seconds=lease_seconds)).isoformat()
         with self.immediate() as con:
-            row = con.execute("""SELECT * FROM jobs WHERE kind=? AND state IN ('Queued','Retry waiting')
+            row = con.execute("""SELECT * FROM jobs WHERE kind=? AND state NOT IN ('Complete','Cancelled','Failed')
                 AND (not_before IS NULL OR not_before<=?) AND (lease_until IS NULL OR lease_until<?)
                 ORDER BY created_at LIMIT 1""", (kind, now.isoformat(), now.isoformat())).fetchone()
             if not row:
@@ -158,5 +158,5 @@ class Database:
 
     def eligible_for_retention(self, before: datetime) -> list[sqlite3.Row]:
         with self.connect() as con:
-            return con.execute("""SELECT * FROM clips WHERE state IN ('Finalized','Interrupted') AND protected=0
+            return con.execute("""SELECT * FROM clips WHERE state IN ('Finalized','Interrupted','Delete pending') AND protected=0
                 AND recording_path IS NOT NULL AND ended_at<?""", (before.isoformat(),)).fetchall()

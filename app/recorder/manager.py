@@ -34,16 +34,16 @@ def run(settings: Settings, db: Database) -> None:
             reload_requested = False
             try:
                 updated = load(settings.path)
-                old = {camera.id: camera for camera in settings.cameras}
-                new = {camera.id: camera for camera in updated.cameras}
-                for camera_id, worker in list(workers.items()):
-                    replacement = new.get(camera_id)
-                    if not replacement or not replacement.enabled or old.get(camera_id) != replacement:
-                        worker.request_stop(); threads[camera_id].join(timeout=15)
-                        if not threads[camera_id].is_alive(): threads.pop(camera_id); workers.pop(camera_id)
+                for worker in workers.values():
+                    worker.request_stop()
+                for thread in threads.values():
+                    thread.join(timeout=15)
+                if any(thread.is_alive() for thread in threads.values()):
+                    raise RuntimeError("recorder workers did not stop for configuration reload")
+                workers.clear(); threads.clear()
                 settings = updated
                 for camera in settings.cameras:
-                    if camera.enabled and camera.id not in workers: start(camera)
+                    if camera.enabled: start(camera)
             except Exception as exc:
                 db.health("recorder", "error", f"configuration reload rejected: {exc}")
         time.sleep(0.5)
