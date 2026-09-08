@@ -22,6 +22,27 @@ def create_app(settings: Settings, db: Database) -> Flask:
     lan = bool(settings.dashboard.get("lan_enabled", False))
     previews = PreviewManager(settings)
 
+    @app.template_filter("localtime")
+    def localtime(value):
+        try:
+            parsed = datetime.fromisoformat(str(value))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(settings.timezone).strftime("%b %d, %Y · %I:%M %p").replace(" 0", " ")
+        except (TypeError, ValueError):
+            return str(value) if value is not None else "—"
+
+    @app.template_filter("gib")
+    def gib(value):
+        try:
+            return f"{int(value or 0) / 1073741824:.1f} GiB"
+        except (TypeError, ValueError):
+            return "—"
+
+    @app.context_processor
+    def dashboard_context():
+        return {"timezone_name": str(settings.timezone)}
+
     def safe_next(value: str | None) -> str:
         if not value:
             return url_for("index")
@@ -87,7 +108,7 @@ def create_app(settings: Settings, db: Database) -> Flask:
     def index():
         previews.reap()
         mounts = [validate_mount(item) for item in (settings.recording, settings.archive)]
-        return render_template("index.html", mounts=mounts, clips=db.list_clips(10), config_cameras=settings.cameras, now=datetime.now(UTC))
+        return render_template("index.html", mounts=mounts, clips=db.list_clips(10), config_cameras=settings.cameras, preview=settings.preview, now=datetime.now(UTC))
 
     @app.get("/clips")
     @authenticated
@@ -118,7 +139,7 @@ def create_app(settings: Settings, db: Database) -> Flask:
     @app.get("/settings")
     @authenticated
     def settings_page():
-        return render_template("settings.html", dashboard=settings.dashboard, cameras=settings.cameras)
+        return render_template("settings.html", dashboard=settings.dashboard, cameras=settings.cameras, storage=(settings.recording, settings.archive), preview=settings.preview)
 
     @app.post("/preview/<camera_id>/start")
     @authenticated
@@ -135,8 +156,9 @@ def create_app(settings: Settings, db: Database) -> Flask:
     @authenticated
     def preview_view(camera_id: str):
         previews.reap()
-        if camera_id not in previews.active: abort(404)
-        return render_template("preview.html", camera_id=camera_id)
+        camera = next((item for item in settings.cameras if item.id == camera_id), None)
+        if camera_id not in previews.active or camera is None: abort(404)
+        return render_template("preview.html", camera_id=camera_id, camera_name=camera.name)
 
     @app.post("/preview/<camera_id>/stop")
     @authenticated
